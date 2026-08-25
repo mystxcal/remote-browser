@@ -1,0 +1,146 @@
+import { Readable } from "node:stream";
+import { describe, expect, it, vi } from "vitest";
+
+import type { CdpSend } from "../types";
+import { createAssetFetcher, type DirectRequest, type DirectResponse } from "./fetch";
+import type { AssetRef } from "./token";
+
+const ref: AssetRef = {
+  url: "https://assets.example/not-really-an-image.png",
+  sessionId: "session-a",
+  tabId: "tab-a",
+};
+
+describe("asset fetch lanes", () => {
+  it("falls back from any Lane-A setup error to Lane B with browser cookies and UA", async () => {
+    const methods: string[] = [];
+    const send: CdpSend = async (_sessionId, method) => {
+      methods.push(method);
+      if (method === "Page.getFrameTree") {
+        return { frameTree: { frame: { id: "frame-a" } } };
+      }
+      if (method === "Network.loadNetworkResource") throw new Error("experimental failure");
+      if (method === "Network.getCookies") {
+        return { cookies: [{ name: "gate", value: "open" }] };
+      }
+      if (method === "Browser.getVersion") return { userAgent: "Browser UA" };
+      throw new Error(`Unexpected CDP method ${method}`);
+    };
+    const directRequest = vi.fn<DirectRequest>(async (_url, options) => {
+      expect(options.headers).toMatchObject({
+        cookie: "gate=open",
+        "user-agent": "Browser UA",
+      });
+      return directResponse("fallback", { "content-type": "text/plain" });
+    });
+    const fetcher = createAssetFetcher({
+      send,
+      sessionFor: () => "cdp-session-a",
+      directRequest,
+    });
+
+    const response = await fetcher.fetch({ ref });
+
+    expect(response.lane).toBe("direct");
+    expect(await readBody(response.body)).toBe("fallback");
+    expect(methods).toContain("Network.loadNetworkResource");
+    expect(directRequest).toHaveBeenCalledOnce();
+  });
+
+  it("sends Range straight through Lane B and never attempts Lane A", async () => {
+    const send = vi.fn<CdpSend>(async (_sessionId, method) => {
+      if (method === "Network.getCookies") return { cookies: [] };
+      if (method === "Browser.getVersion") return { userAgent: "Range UA" };
+      throw new Error(`Lane A must not run for Range: ${method}`);
+    });
+    const directRequest = vi.fn<DirectRequest>(async (_url, options) => {
+      expect(options.headers.range).toBe("bytes=500-999");
+      return directResponse(
+        "partial",
+        {
+          "content-type": "video/mp4",
+          "content-range": "bytes 500-999/2000",
+        },
+        206,
+      );
+    });
+    const fetcher = createAssetFetcher({
+      send,
+      sessionFor: () => "cdp-session-a",
+      directRequest,
+    });
+
+    const response = await fetcher.fetch({ ref, range: "bytes=500-999" });
+
+    expect(response.statusCode).toBe(206);
+    expect(response.headers["content-range"]).toBe("bytes 500-999/2000");
+    expect(send.mock.calls.map((call) => call[1])).toEqual([
+      "Network.getCookies",
+      "Browser.getVersion",
+    ]);
+  });
+
+  it("streams decoded CDP chunks without stale upstream encoding or length headers", async () => {
+    const chunks = [Buffer.from("first-"), Buffer.from("second")];
+    let readIndex = 0;
+    const send: CdpSend = async (_sessionId, method, params) => {
+      if (method === "Page.getFrameTree") {
+        return { frameTree: { frame: { id: "frame-a" } } };
+      }
+      if (method === "Network.loadNetworkResource") {
+        return {
+          resource: {
+            success: true,
+            httpStatusCode: 200,
+            headers: {
+              "Content-Type": "application/json; charset=utf-8",
+              "Content-Encoding": "br",
+              "Content-Length": "5",
+            },
+            stream: "stream-a",
+          },
+        };
+      }
+      if (method === "IO.read") {
+        expect(params?.size).toBe(64 * 1024);
+        const chunk = chunks[readIndex++]!;
+        return {
+          data: chunk.toString("base64"),
+          base64Encoded: true,
+          eof: readIndex === chunks.length,
+        };
+      }
+      if (method === "IO.close") return {};
+      throw new Error(`Unexpected CDP method ${method}`);
+    };
+    const directRequest = vi.fn<DirectRequest>();
+    const fetcher = createAssetFetcher({
+      send,
+      sessionFor: () => "cdp-session-a",
+      directRequest,
+    });
+
+    const response = await fetcher.fetch({ ref });
+
+    expect(response.lane).toBe("cdp");
+    expect(response.headers["content-type"]).toBe("application/json; charset=utf-8");
+    expect(response.headers["content-encoding"]).toBeUndefined();
+    expect(response.headers["content-length"]).toBeUndefined();
+    expect(await readBody(response.body)).toBe("first-second");
+    expect(directRequest).not.toHaveBeenCalled();
+  });
+});
+
+function directResponse(
+  body: string,
+  headers: DirectResponse["headers"],
+  statusCode = 200,
+): DirectResponse {
+  return { statusCode, headers, body: Readable.from([body]) };
+}
+
+async function readBody(body: Readable): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of body) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks).toString("utf8");
+}
