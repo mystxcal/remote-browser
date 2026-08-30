@@ -50,12 +50,12 @@
     "dev": "pnpm -r --parallel --if-present run dev"
   },
   "devDependencies": {
-    "playwright": "^1.48.0",
+    "playwright": "^1.62.1",
     "prettier": "^3.3.3",
-    "react": "18.3.1",
-    "react-dom": "18.3.1",
-    "tsx": "^4.19.0",
-    "typescript": "^5.5.4",
-    "vitest": "^3.0.0"
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
   }
 }
