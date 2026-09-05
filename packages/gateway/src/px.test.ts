@@ -100,6 +100,34 @@ function frame(sessionId: number, data: string): Protocol.Page.ScreencastFrameEv
 }
 
 describe("createScreencast", () => {
+  it("keeps an early first frame and replays it on repeated pixel requests", async () => {
+    const browser = new MockBrowser();
+    const hub = new TabHub({ sessionId: "session", tabId: "tab-1" });
+    const sent: Down[] = [];
+    const send: CdpSend = async (session, method) => {
+      if (method === "Page.startScreencast") browser.frame(session, frame(1, "first"));
+      return {};
+    };
+    const controller = createScreencast({
+      browser: {
+        send,
+        onAttached: browser.onAttached.bind(browser),
+        onDetached: browser.onDetached.bind(browser),
+        onSessionEvent: browser.onSessionEvent.bind(browser),
+      },
+      hubFor: () => hub,
+      publish: (message) => sent.push(message),
+    });
+    browser.attach({ targetId: "tab-1", sessionId: "cdp-1", type: "page" });
+    await controller.handle({ t: "mode", tab: "tab-1", mode: "px" });
+    expect(sent.some((message) => message.t === "px" && message.data === "first")).toBe(true);
+    expect(sent.slice(-2).map((message) => message.t)).toEqual(["mode", "px"]);
+    sent.length = 0;
+    await controller.handle({ t: "mode", tab: "tab-1", mode: "px" });
+    expect(sent.map((message) => message.t)).toEqual(["mode", "px"]);
+    controller.dispose();
+  });
+
   it("toggles px/dom, acks every frame, drops backpressured frames, and leaves rrweb recording", async () => {
     const browser = new MockBrowser();
     const hub = new TabHub({ sessionId: "session", tabId: "tab-1" });

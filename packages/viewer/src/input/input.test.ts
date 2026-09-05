@@ -459,7 +459,9 @@ describe("P1 input capture", () => {
     doc.fire("input", { target: input, isTrusted: true });
 
     expect(paste.preventDefault).not.toHaveBeenCalled();
-    expect(sent).toEqual([{ t: "value", tab: "T1", nodeId: 40, value: "prefix paste suffix" }]);
+    expect(sent).toEqual([
+      { t: "value", commit: false, tab: "T1", nodeId: 40, value: "prefix paste suffix" },
+    ]);
   });
 
   it("forwards an orphan native input through the existing value message once", () => {
@@ -484,7 +486,10 @@ describe("P1 input capture", () => {
     doc.fire("change", { target: input, isTrusted: true });
 
     expect(inputs).toEqual([41]);
-    expect(sent).toEqual([{ t: "value", tab: "T1", nodeId: 41, value: "spellchecked" }]);
+    expect(sent).toEqual([
+      { t: "value", tab: "T1", nodeId: 41, value: "spellchecked", commit: false },
+      { t: "value", tab: "T1", nodeId: 41, value: "spellchecked" },
+    ]);
   });
 
   it("does not let a mobile Unidentified keydown poison the value-sync clock", () => {
@@ -518,14 +523,14 @@ describe("P1 input capture", () => {
     doc.fire("keydown", keyboard(input, "Unidentified"));
     doc.fire("input", { target: input, isTrusted: true });
 
-    expect(sent).toContainEqual({ t: "value", tab: "T1", nodeId: 44, value: "a" });
+    expect(sent).toContainEqual({ t: "value", commit: false, tab: "T1", nodeId: 44, value: "a" });
 
     // A value sync must not suppress the next value sync in the same typing window.
     for (const value of ["ab", "abc", "abcd", "abcde", "abcdef"]) {
       input.value = value;
       doc.fire("keydown", keyboard(input, "Unidentified"));
       doc.fire("input", { target: input, isTrusted: true });
-      expect(sent.at(-1)).toEqual({ t: "value", tab: "T1", nodeId: 44, value });
+      expect(sent.at(-1)).toEqual({ t: "value", commit: false, tab: "T1", nodeId: 44, value });
     }
 
     // Contrast: a real character key DOES mark the clock, suppressing the redundant value-sync
@@ -577,7 +582,7 @@ describe("P1 input capture", () => {
 
     expect(inputs).toEqual([42, 42, 43]);
     expect(sent).toEqual([
-      { t: "value", tab: "T1", nodeId: 42, value: "漢字" },
+      { t: "value", commit: false, tab: "T1", nodeId: 42, value: "漢字" },
       { t: "text", tab: "T1", insert: "編集" },
     ]);
   });
@@ -607,7 +612,7 @@ describe("P1 input capture", () => {
     timers.advance(499);
     expect(sent).toEqual([]);
     timers.advance(1);
-    expect(sent).toEqual([{ t: "value", tab: "T1", nodeId: 45, value: "漢字" }]);
+    expect(sent).toEqual([{ t: "value", commit: false, tab: "T1", nodeId: 45, value: "漢字" }]);
     expect(timers.pending()).toBe(0);
     change.dispose();
   });
@@ -632,7 +637,9 @@ describe("P1 input capture", () => {
     doc.fire("compositionstart", { target: input, isTrusted: true, data: "" });
     doc.fire("input", { target: input, isTrusted: true, isComposing: false });
 
-    expect(sent).toEqual([{ t: "value", tab: "T1", nodeId: 46, value: "recovered" }]);
+    expect(sent).toEqual([
+      { t: "value", commit: false, tab: "T1", nodeId: 46, value: "recovered" },
+    ]);
     expect(timers.pending()).toBe(0);
     timers.advance(500);
     expect(sent).toHaveLength(1);
@@ -668,7 +675,7 @@ describe("P1 input capture", () => {
     doc.fire("keydown", keyboard(input, "Enter", { code: "Enter" }));
 
     expect(sent).toEqual([
-      { t: "value", tab: "T1", nodeId: 47, value: "committed" },
+      { t: "value", commit: false, tab: "T1", nodeId: 47, value: "committed" },
       { t: "key", tab: "T1", kind: "down", key: "Enter", code: "Enter", mods: 0 },
     ]);
     expect(timers.pending()).toBe(0);
@@ -744,7 +751,7 @@ describe("P1 input capture", () => {
     doc.fire("compositionstart", { target: input, isTrusted: true, data: "" });
     doc.fire("compositionend", { target: input, isTrusted: true, data: "完成" });
 
-    expect(sent).toEqual([{ t: "value", tab: "T1", nodeId: 49, value: "完成" }]);
+    expect(sent).toEqual([{ t: "value", commit: false, tab: "T1", nodeId: 49, value: "完成" }]);
     expect(timers.pending()).toBe(0);
     timers.advance(500);
     expect(sent).toHaveLength(1);
@@ -782,7 +789,7 @@ describe("P1 input capture", () => {
     expect(sent).toEqual([]);
     timers.advance(1);
 
-    expect(sent).toEqual([{ t: "value", tab: "T1", nodeId: 50, value: "にほん" }]);
+    expect(sent).toEqual([{ t: "value", commit: false, tab: "T1", nodeId: 50, value: "にほん" }]);
     change.dispose();
   });
 

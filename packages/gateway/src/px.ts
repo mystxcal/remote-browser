@@ -36,6 +36,7 @@ interface TabState {
   target: TargetRef;
   hub: TabHub;
   screencasting: boolean;
+  lastFrame?: Extract<Down, { t: "px" }>;
   queue: Promise<void>;
 }
 
@@ -66,27 +67,51 @@ export function createScreencast(opts: ScreencastOpts): ScreencastController {
       const viewport = state.hub.viewport;
       const w = frameDimension(viewport?.w, event.metadata.deviceWidth);
       const h = frameDimension(viewport?.h, event.metadata.deviceHeight);
-      opts.publish({ t: "px", tab: state.target.targetId, data: event.data, w, h });
-      // No frame is retained here. ViewerConn applies its bufferedAmount gate synchronously;
-      // a rejected frame is dropped and the next CDP frame remains the only candidate.
+      state.lastFrame = { t: "px", tab: state.target.targetId, data: event.data, w, h };
+      opts.publish(state.lastFrame);
+      // Retain one bounded latest frame for repeated mode requests on static pages.
+      // ViewerConn still drops delivery to stalled viewers rather than queueing frames.
+    },
+  );
+
+  const unsubscribeNavigation = opts.browser.onSessionEvent(
+    "Page.frameNavigated",
+    (sessionId, event) => {
+      if (!event.frame.parentId) {
+        const state = sessions.get(sessionId);
+        if (state) delete state.lastFrame;
+      }
     },
   );
 
   const applyMode = async (state: TabState, mode: "dom" | "px"): Promise<void> => {
     if (mode === "px") {
-      if (state.screencasting && state.hub.mode === "px") return;
+      if (state.screencasting && state.hub.mode === "px") {
+        opts.publish({ t: "mode", tab: state.target.targetId, mode: "px" });
+        if (state.lastFrame) opts.publish(state.lastFrame);
+        return;
+      }
       const viewport = state.hub.viewport;
-      await opts.browser.send(state.target.sessionId, "Page.startScreencast", {
-        format: "jpeg",
-        quality: 60,
-        everyNthFrame: 1,
-        ...(viewport === null
-          ? {}
-          : {
-              maxWidth: frameDimension(viewport.w, viewport.w),
-              maxHeight: frameDimension(viewport.h, viewport.h),
-            }),
-      });
+      state.screencasting = true;
+      state.hub.mode = "px";
+      try {
+        await opts.browser.send(state.target.sessionId, "Page.startScreencast", {
+          format: "jpeg",
+          quality: 60,
+          everyNthFrame: 1,
+          ...(viewport === null
+            ? {}
+            : {
+                maxWidth: frameDimension(viewport.w, viewport.w),
+                maxHeight: frameDimension(viewport.h, viewport.h),
+              }),
+        });
+      } catch (error) {
+        state.screencasting = false;
+        state.hub.mode = "dom";
+        delete state.lastFrame;
+        throw error;
+      }
       if (disposed || sessions.get(state.target.sessionId) !== state) {
         await opts.browser
           .send(state.target.sessionId, "Page.stopScreencast")
@@ -96,6 +121,8 @@ export function createScreencast(opts: ScreencastOpts): ScreencastController {
       state.screencasting = true;
       state.hub.mode = "px";
       opts.publish({ t: "mode", tab: state.target.targetId, mode: "px" });
+      // A frame can precede CDP's start acknowledgement; the viewer ignores it until mode.
+      if (state.lastFrame) opts.publish(state.lastFrame);
       return;
     }
 
@@ -105,6 +132,7 @@ export function createScreencast(opts: ScreencastOpts): ScreencastController {
     }
     if (disposed || sessions.get(state.target.sessionId) !== state) return;
     state.screencasting = false;
+    delete state.lastFrame;
     state.hub.mode = "dom";
     opts.publish({ t: "mode", tab: state.target.targetId, mode: "dom" });
     for (const down of state.hub.joinPayload()) opts.publish(down);
@@ -156,6 +184,7 @@ export function createScreencast(opts: ScreencastOpts): ScreencastController {
       if (disposed) return;
       disposed = true;
       unsubscribeFrame();
+      unsubscribeNavigation();
       for (const state of tabs.values()) {
         if (state.screencasting) {
           void opts.browser

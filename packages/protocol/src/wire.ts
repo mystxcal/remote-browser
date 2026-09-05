@@ -151,6 +151,8 @@ export type Up =
       tab: TabId;
       nodeId: number;
       value: string;
+      /** False for a native editing event; omitted preserves legacy committed-change behavior. */
+      commit?: boolean;
       /** Checkbox/radio committed state; when present, `value` is not applied. */
       checked?: boolean;
       /** Multiple-select committed option values; when present, `value` is not applied. */

@@ -329,7 +329,7 @@ export function createCommandHandler(
             node.dispatchEvent(new Event("click", { bubbles: true, composed: true }));
           }
           node.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-          node.dispatchEvent(new Event("change", { bubbles: true }));
+          if (cmd.commit !== false) node.dispatchEvent(new Event("change", { bubbles: true }));
           emitter.emit({ kind: "cmdres", reqId: cmd.reqId, ok: true });
           return;
         }

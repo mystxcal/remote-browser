@@ -169,7 +169,7 @@ describe("InputRelay", () => {
       { t: "key", tab: "tab-1", kind: "down", key: "!", code: "Digit1", mods: Mod.Shift },
       { t: "key", tab: "tab-1", kind: "up", key: "!", code: "Digit1", mods: Mod.Shift },
       { t: "text", tab: "tab-1", insert: "pasted line one\npasted line two" },
-      { t: "value", tab: "tab-1", nodeId: 8, value: "selected" },
+      { t: "value", tab: "tab-1", nodeId: 8, value: "selected", commit: false },
       { t: "value", tab: "tab-1", nodeId: 9, value: "on", checked: true },
       {
         t: "value",
@@ -220,7 +220,7 @@ describe("InputRelay", () => {
     ]);
     expect(h.commands.slice(-9)).toEqual([
       { cmd: "resolve", nodeId: 8 },
-      { cmd: "value", nodeId: 8, value: "selected" },
+      { cmd: "value", nodeId: 8, value: "selected", commit: false },
       { cmd: "resolve", nodeId: 9 },
       { cmd: "value", nodeId: 9, value: "on", checked: true },
       { cmd: "resolve", nodeId: 10 },

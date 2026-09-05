@@ -59,6 +59,7 @@ export type AgentCmd =
       reqId: number;
       nodeId: number;
       value: string;
+      commit?: boolean;
       /** Checkbox/radio committed state; when present, `value` is not applied. */
       checked?: boolean;
       /** Multiple-select committed option values; when present, `value` is not applied. */

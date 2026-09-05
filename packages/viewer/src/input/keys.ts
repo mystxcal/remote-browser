@@ -119,6 +119,7 @@ export function shouldPreventEchoFieldDefault(
 export function attachKeyCapture(options: KeyCaptureOptions): () => void {
   const now = options.now ?? Date.now;
   let focused: EditableFocus | null = null;
+  let enterDown = false;
   const notifyFocus = () => {
     const active = deepActiveElement(options.focusRoot ?? options.doc);
     if (!isTextEditable(active)) {
@@ -143,10 +144,17 @@ export function attachKeyCapture(options: KeyCaptureOptions): () => void {
   };
   const onKey = (event: KeyboardEvent, kind: "down" | "up") => {
     if (!event.isTrusted || event.isComposing || isLocalShortcut(event)) return;
+    if (event.key === "Enter") enterDown = kind === "down";
     // A value control pastes locally and sends its resulting value. Forwarding
     // Ctrl/Cmd-V as well can paste the remote browser's unrelated clipboard.
-    if (isElement(event.target) && isValueEchoField(event.target) &&
-        !event.altKey && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v") return;
+    if (
+      isElement(event.target) &&
+      isValueEchoField(event.target) &&
+      !event.altKey &&
+      (event.ctrlKey || event.metaKey) &&
+      event.key.toLowerCase() === "v"
+    )
+      return;
     if (kind === "down") options.onKeyDown?.(event, focused);
     const target = isElement(event.target) ? event.target : focused?.element;
     if (kind === "down" && event.key === "Enter" && target !== undefined && isEchoField(target)) {
@@ -165,7 +173,12 @@ export function attachKeyCapture(options: KeyCaptureOptions): () => void {
     // otherwise it suppresses change.ts's value-sync — the ONLY lane that carries mobile text to
     // the remote — for every keystroke, so nothing ever reaches the field. Real character keys
     // (event.key.length === 1) and true-IME keys (isComposing, bailed above) are unaffected.
-    if (kind === "down" && target !== undefined && isEchoField(target) && event.key !== "Unidentified") {
+    if (
+      kind === "down" &&
+      target !== undefined &&
+      isEchoField(target) &&
+      event.key !== "Unidentified"
+    ) {
       options.forwardedClock?.mark(nearestNodeId(target, options.getNodeId), now());
     }
     if (target === undefined || !isEchoField(target) || shouldPreventEchoFieldDefault(event)) {
@@ -183,24 +196,9 @@ export function attachKeyCapture(options: KeyCaptureOptions): () => void {
       return;
     }
     event.preventDefault();
+    if (enterDown) return;
     options.flushComposing?.(event.target);
     const mods = eventMods(event as InputEvent & KeyboardEvent);
-    const nodeId = nearestNodeId(event.target, options.getNodeId);
-    if (nodeId >= 0) {
-      const base = {
-        t: "ptr" as const,
-        tab: options.tab,
-        nodeId,
-        rx: 0.5,
-        ry: 0.5,
-        vx: 0,
-        vy: 0,
-        buttons: 0,
-        mods,
-      };
-      options.send({ ...base, kind: "down" });
-      options.send({ ...base, kind: "up" });
-    }
     options.send({
       t: "key",
       tab: options.tab,

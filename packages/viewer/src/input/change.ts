@@ -62,12 +62,13 @@ export function attachChangeCapture(options: ChangeCaptureOptions): {
     return resolved?.element === control ? { control, nodeId: resolved.nodeId } : null;
   };
 
-  const sendValue = (control: ValueControl, nodeId: number) => {
+  const sendValue = (control: ValueControl, nodeId: number, commit = false) => {
     const message: Extract<Parameters<SendInput>[0], { t: "value" }> = {
       t: "value",
       tab: options.tab,
       nodeId,
       value: control.value,
+      ...(commit ? {} : { commit: false }),
     };
     const tag = control.tagName.toLowerCase();
     if (tag === "input") {
@@ -136,8 +137,12 @@ export function attachChangeCapture(options: ChangeCaptureOptions): {
     const lastForwardedAt = forwardedClock.get(resolved.nodeId);
     if (lastForwardedAt !== undefined && now() - lastForwardedAt < orphanWindowMs) return;
     const lastValueAt = valueClock.get(resolved.nodeId);
-    if (lastValueAt !== undefined && now() - lastValueAt < orphanWindowMs &&
-        lastValues.get(resolved.control) === resolved.control.value) return;
+    if (
+      lastValueAt !== undefined &&
+      now() - lastValueAt < orphanWindowMs &&
+      lastValues.get(resolved.control) === resolved.control.value
+    )
+      return;
     sendValue(resolved.control, resolved.nodeId);
   };
 
@@ -146,15 +151,14 @@ export function attachChangeCapture(options: ChangeCaptureOptions): {
     const resolved = resolveControl(event.target);
     if (resolved === null) return;
     const lastForwardedAt = forwardedClock.get(resolved.nodeId);
-    const lastValueAt = valueClock.get(resolved.nodeId);
     if (
       isEchoField(resolved.control) &&
-      ((lastForwardedAt !== undefined && now() - lastForwardedAt < typingWindowMs) ||
-        (lastValueAt !== undefined && now() - lastValueAt < typingWindowMs))
+      lastForwardedAt !== undefined &&
+      now() - lastForwardedAt < typingWindowMs
     ) {
       return;
     }
-    sendValue(resolved.control, resolved.nodeId);
+    sendValue(resolved.control, resolved.nodeId, true);
   };
 
   const onCompositionStart = (event: CompositionEvent) => {

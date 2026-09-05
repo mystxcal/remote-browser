@@ -105,6 +105,32 @@ beforeEach(() => vi.stubGlobal("Element", FakeElement));
 afterEach(() => vi.unstubAllGlobals());
 
 describe("mobile input capture", () => {
+  it("does not duplicate physical Enter when beforeinput also reports a line break", () => {
+    const doc = new FakeDocument();
+    const input = new FakeElement(30);
+    input.tagName = "INPUT";
+    doc.activeElement = input;
+    const sent: Up[] = [];
+    attachKeyCapture({
+      doc: doc as unknown as Document,
+      tab: "T1",
+      getNodeId: () => 30,
+      send: (message) => sent.push(message),
+    });
+    const key = {
+      target: input,
+      key: "Enter",
+      code: "Enter",
+      isTrusted: true,
+      isComposing: false,
+      preventDefault: vi.fn(),
+    };
+    doc.fire("keydown", key);
+    doc.fire("beforeinput", beforeInput(input, "insertLineBreak"));
+    doc.fire("keyup", key);
+    expect(sent.map((message) => message.t)).toEqual(["key", "key"]);
+  });
+
   it("leaves a scroll-pan local without preventing or forwarding it", () => {
     const doc = new FakeDocument();
     const scroller = new FakeElement(10);
@@ -253,30 +279,6 @@ describe("mobile input capture", () => {
 
     expect(event.preventDefault).toHaveBeenCalledOnce();
     expect(sent).toEqual([
-      {
-        t: "ptr",
-        tab: "T1",
-        kind: "down",
-        nodeId: 30,
-        rx: 0.5,
-        ry: 0.5,
-        vx: 0,
-        vy: 0,
-        buttons: 0,
-        mods: 0,
-      },
-      {
-        t: "ptr",
-        tab: "T1",
-        kind: "up",
-        nodeId: 30,
-        rx: 0.5,
-        ry: 0.5,
-        vx: 0,
-        vy: 0,
-        buttons: 0,
-        mods: 0,
-      },
       { t: "key", tab: "T1", kind: "down", key: "Enter", code: "Enter", mods: 0 },
       { t: "key", tab: "T1", kind: "up", key: "Enter", code: "Enter", mods: 0 },
     ]);
