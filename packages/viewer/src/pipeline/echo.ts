@@ -210,9 +210,10 @@ export function createEchoFilter(options: EchoFilterOptions = {}): EchoFilter {
     armDecay(focus.nodeId, state);
   };
 
-  filter.keyDown = (event, focus) => {
+  filter.keyDown = (_event, focus) => {
     filter.setFocused(focus);
-    if (event.key === "Enter" && focus !== null) reconcile(focus.nodeId);
+    // Enter is not an acknowledgement of earlier edits. Keep local text protected
+    // until the ordinary reconciliation window; a delayed echo may be a prefix.
   };
 
   filter.getFocused = () => focused;

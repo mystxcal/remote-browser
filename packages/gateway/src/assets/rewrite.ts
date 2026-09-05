@@ -32,6 +32,8 @@ interface RewriteContext {
   sessionId: string;
   tabId: string;
   baseUrl?: string;
+  assetUrl?: (url: string) => string;
+  tags?: Map<number, string>;
 }
 
 interface Replacement {
@@ -47,8 +49,22 @@ export function createRewriteStage(serverKey: Buffer): RewriteStage {
   // Do not let later mutation of the caller's key silently rotate an already-wired stage.
   const key = Buffer.from(serverKey);
   const documentUrls = new Map<string, string>();
+  const tags = new Map<number, string>();
+  // One live tab owns this stage. Bound memoization while making repeated DOM references
+  // (preload + visible image, mutations, resnapshots) share the browser's HTTP cache key.
+  const assetUrls = new Map<string, string>();
+  const assetUrl = (url: string, ctx: { sessionId: string; tabId: string }): string => {
+    const id = JSON.stringify([ctx.sessionId, ctx.tabId, url]);
+    const existing = assetUrls.get(id);
+    if (existing !== undefined) return existing;
+    const result = proxyUrl(url, key, ctx);
+    if (assetUrls.size >= 4096) assetUrls.delete(assetUrls.keys().next().value!);
+    assetUrls.set(id, result);
+    return result;
+  };
 
   return (event, ctx) => {
+    if (event.type === EventType.FullSnapshot) tags.clear();
     const documentKey = JSON.stringify([ctx.sessionId, ctx.tabId]);
     if (event.type === EventType.Meta) {
       const href = record(event.data).href;
@@ -62,6 +78,8 @@ export function createRewriteStage(serverKey: Buffer): RewriteStage {
       sessionId: ctx.sessionId,
       tabId: ctx.tabId,
       baseUrl: documentUrls.get(documentKey),
+      assetUrl: (url) => assetUrl(url, ctx),
+      tags,
     });
   };
 }
@@ -115,7 +133,12 @@ function rewriteMutationEvent(
   const attributes = Array.isArray(data.attributes)
     ? data.attributes.map((mutation) => {
         const item = record(mutation);
-        const rewritten = rewriteAttributes(item.attributes, key, ctx);
+        const rewritten = rewriteAttributes(
+          item.attributes,
+          key,
+          ctx,
+          ctx.tags?.get(item.id as number),
+        );
         if (rewritten === item.attributes) return mutation;
         changed = true;
         return { ...item, attributes: rewritten };
@@ -210,6 +233,8 @@ function rewriteSerializedNode(
   insideStyle: boolean,
 ): unknown {
   const node = record(value);
+  const tag = typeof node.tagName === "string" ? node.tagName.toLowerCase() : undefined;
+  if (node.type === NODE_ELEMENT && typeof node.id === "number" && tag) ctx.tags?.set(node.id, tag);
   if (node.type === NODE_TEXT && insideStyle && typeof node.textContent === "string") {
     const textContent = rewriteCssText(
       node.textContent,
@@ -220,7 +245,7 @@ function rewriteSerializedNode(
   }
 
   let changed = false;
-  const attributes = rewriteAttributes(node.attributes, key, ctx);
+  const attributes = rewriteAttributes(node.attributes, key, ctx, tag);
   changed ||= attributes !== node.attributes;
 
   const childIsStyle =
@@ -243,13 +268,27 @@ function rewriteSerializedNode(
   };
 }
 
-function rewriteAttributes(value: unknown, key: Buffer, ctx: RewriteContext): unknown {
+function rewriteAttributes(
+  value: unknown,
+  key: Buffer,
+  ctx: RewriteContext,
+  tag?: string,
+): unknown {
   if (!isRecord(value)) return value;
   let changed = false;
   const output: UnknownRecord = { ...value };
 
   for (const [name, original] of Object.entries(value)) {
     const lowerName = name.toLowerCase();
+    // MediaSource object URLs are not image Blobs. Preserve their source kind so
+    // the viewer's existing media compositor selects RTC rather than HTTP playback.
+    if (
+      lowerName === "src" &&
+      typeof original === "string" &&
+      /^blob:/i.test(original) &&
+      (tag === "video" || tag === "audio" || tag === "source")
+    )
+      continue;
     let rewritten: unknown = original;
     if (DIRECT_URL_ATTRIBUTES.has(lowerName) && typeof original === "string") {
       rewritten = rewriteUrlPreservingSpace(
@@ -474,6 +513,7 @@ function addResolvedReplacement(
   if (candidate === "" || candidate.startsWith("#") || /^data:/i.test(candidate)) return;
   const url = absoluteUrl(candidate, baseUrl);
   if (url === null) return;
+  if (!/^(https?:|blob:)/i.test(url)) return;
   replacements.push({ start, end, value: rewrite(url) });
 }
 
@@ -492,6 +532,7 @@ function rewriteUrlPreservingSpace(
 }
 
 function proxyUrl(url: string, key: Buffer, ctx: RewriteContext): string {
+  if (ctx.assetUrl !== undefined) return ctx.assetUrl(url);
   const token = sealAssetToken({ url, sessionId: ctx.sessionId, tabId: ctx.tabId }, key);
   return `/s/${encodeURIComponent(ctx.sessionId)}/a/${token}`;
 }

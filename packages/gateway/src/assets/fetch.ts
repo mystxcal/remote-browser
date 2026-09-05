@@ -83,6 +83,10 @@ export function createAssetFetcher(deps: AssetFetcherDeps): AssetFetcher {
         throw new Error(`Asset tab is not attached: ${request.ref.tabId}`);
       }
 
+      if (new URL(request.ref.url).protocol === "blob:") {
+        return fetchBrowserObject(deps, request.ref, cdpSessionId);
+      }
+
       if (request.range !== undefined) {
         return fetchDirect(deps, directRequest, request, cdpSessionId);
       }
@@ -94,6 +98,86 @@ export function createAssetFetcher(deps: AssetFetcherDeps): AssetFetcher {
       }
     },
   };
+}
+
+/** Object URLs are capabilities in the originating browser, not network addresses.
+ * Hold the Blob there and pull bounded slices; never copy an entire image into a
+ * protocol message or attempt an HTTP fallback from another process.
+ */
+async function fetchBrowserObject(
+  deps: AssetFetcherDeps,
+  ref: AssetRef,
+  sessionId: string,
+): Promise<AssetFetchResponse> {
+  const frameId = deps.frameFor
+    ? await deps.frameFor(ref, sessionId)
+    : await mainFrameId(deps.send, sessionId);
+  const world = (await deps.send(sessionId, "Page.createIsolatedWorld", {
+    frameId,
+    worldName: "mirror-assets",
+  })) as { executionContextId: number };
+  const result = (await deps.send(sessionId, "Runtime.evaluate", {
+    contextId: world.executionContextId,
+    expression: `fetch(${JSON.stringify(ref.url)}).then(r => { if (!r.ok) throw new Error('Object unavailable'); return r.blob(); })`,
+    awaitPromise: true,
+    returnByValue: false,
+  })) as { result?: { objectId?: string }; exceptionDetails?: unknown };
+  const objectId = result.result?.objectId;
+  if (!objectId) throw new Error("Browser object is unavailable or revoked");
+  let released = false;
+  const release = async () => {
+    if (released) return;
+    released = true;
+    await deps.send(sessionId, "Runtime.releaseObject", { objectId }).catch(() => undefined);
+  };
+  try {
+    if (result.exceptionDetails) throw new Error("Browser object is unavailable or revoked");
+    const metadata = (await deps.send(sessionId, "Runtime.callFunctionOn", {
+      objectId,
+      functionDeclaration: "function(){return {size:this.size,type:this.type}}",
+      returnByValue: true,
+    })) as { result?: { value?: { size: number; type: string } } };
+    const info = metadata.result?.value;
+    if (!info || !Number.isSafeInteger(info.size) || info.size < 0)
+      throw new Error("Invalid browser object metadata");
+    const body = Readable.from(
+      (async function* () {
+        try {
+          for (let offset = 0; offset < info.size; offset += IO_CHUNK_BYTES) {
+            const part = (await deps.send(sessionId, "Runtime.callFunctionOn", {
+              objectId,
+              functionDeclaration: `async function(offset, size) {
+              const bytes = new Uint8Array(await this.slice(offset, offset + size).arrayBuffer());
+              let binary = ''; for (let i=0;i<bytes.length;i+=8192) binary += String.fromCharCode(...bytes.subarray(i,i+8192));
+              return btoa(binary);
+            }`,
+              arguments: [{ value: offset }, { value: IO_CHUNK_BYTES }],
+              awaitPromise: true,
+              returnByValue: true,
+            })) as { result?: { value?: unknown }; exceptionDetails?: unknown };
+            if (part.exceptionDetails || typeof part.result?.value !== "string")
+              throw new Error("Browser object read failed");
+            yield Buffer.from(part.result.value, "base64");
+          }
+        } finally {
+          await release();
+        }
+      })(),
+    );
+    body.once("close", () => void release());
+    return {
+      statusCode: 200,
+      headers: {
+        "content-type": info.type || "application/octet-stream",
+        "content-length": String(info.size),
+      },
+      body,
+      lane: "cdp",
+    };
+  } catch (error) {
+    await release();
+    throw error;
+  }
 }
 
 async function fetchThroughCdp(

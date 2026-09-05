@@ -517,6 +517,14 @@ describe("P1 input capture", () => {
 
     expect(sent).toContainEqual({ t: "value", tab: "T1", nodeId: 44, value: "a" });
 
+    // A value sync must not suppress the next value sync in the same typing window.
+    for (const value of ["ab", "abc", "abcd", "abcde", "abcdef"]) {
+      input.value = value;
+      doc.fire("keydown", keyboard(input, "Unidentified"));
+      doc.fire("input", { target: input, isTrusted: true });
+      expect(sent.at(-1)).toEqual({ t: "value", tab: "T1", nodeId: 44, value });
+    }
+
     // Contrast: a real character key DOES mark the clock, suppressing the redundant value-sync
     // (the raw key already typed the character remotely) — existing desktop behavior preserved.
     const other = new FakeElement(45);

@@ -148,7 +148,7 @@ describe("F5 native local typing echo", () => {
     expect(echo(focusEvent(2, 6), { tab: "T1", nowMs: Date.now() })).toBeNull();
   });
 
-  it("snaps a pending authoritative value on Enter", () => {
+  it("does not replace the submitted text with a delayed echo on Enter", () => {
     let now = 0;
     const echo = createEchoFilter({ now: () => now });
     const field = new FakeInput();
@@ -160,7 +160,7 @@ describe("F5 native local typing echo", () => {
 
     echo.keyDown({ key: "Enter" } as KeyboardEvent, focus);
 
-    expect(field.value).toBe("server");
+    expect(field.value).toBe("local");
   });
 
   it("restores the predicted value through the H3 rebuild hook", () => {

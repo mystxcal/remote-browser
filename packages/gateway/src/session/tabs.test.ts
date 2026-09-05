@@ -289,6 +289,45 @@ describe("createTabLifecycle", () => {
     lifecycle.dispose();
   });
 
+  it("always rewrites images in the real lifecycle without optional entrypoint wiring", async () => {
+    const browser = new MockBrowser();
+    const stream = new MessageQueue();
+    const key = Buffer.alloc(32, 8);
+    const lifecycle = createTabLifecycle({
+      browser,
+      assetTokenKey: key,
+      sessionId: "session",
+      agentLink: { msgs: () => stream, sendCmd: async () => ({ reqId: 1, ok: true }) },
+      publish: () => undefined,
+    });
+    browser.attach({ targetId: "tab", sessionId: "cdp", type: "page" });
+    stream.push(hello(1));
+    stream.push(event(EventType.Meta, { href: "https://reader.example/chapter/" }, 1));
+    stream.push(
+      event(
+        EventType.FullSnapshot,
+        {
+          node: { type: 2, id: 1, tagName: "img", attributes: { src: "page.png" }, childNodes: [] },
+          initialOffset: { top: 0, left: 0 },
+        },
+        2,
+      ),
+    );
+    try {
+      await vi.waitFor(() => expect(lifecycle.hubFor("tab")?.snapshot).not.toBeNull());
+      const snapshot = lifecycle.hubFor("tab")!.snapshot!;
+      const src = (snapshot.data as any).node.attributes.src as string;
+      expect(src).toMatch(/^\/s\/session\/a\//);
+      expect(openAssetToken(src.split("/").at(-1)!, key)).toEqual({
+        url: "https://reader.example/chapter/page.png",
+        sessionId: "session",
+        tabId: "tab",
+      });
+    } finally {
+      lifecycle.dispose();
+    }
+  });
+
   it("reactively creates a tab when detaching the final page leaves none", async () => {
     const browser = new MockBrowser();
     browser.autoAttachCreatedTarget = true;

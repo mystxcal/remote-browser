@@ -94,6 +94,49 @@ describe("srcset parsing", () => {
 });
 
 describe("rrweb RewriteStage", () => {
+  it("preserves media-object sources for RTC in snapshots and later mutations", () => {
+    const stage = createRewriteStage(KEY);
+    const src = "blob:https://video.example/mse";
+    const snapshot = fullSnapshot({ type: 2, id: 7, tagName: "video", attributes: { src } });
+    expect(stage(snapshot, CTX)).toEqual(snapshot);
+    const mutation = event({
+      type: EventType.IncrementalSnapshot,
+      timestamp: 30,
+      data: {
+        source: IncrementalSource.Mutation,
+        attributes: [{ id: 7, attributes: { src } }],
+        adds: [],
+        removes: [],
+        texts: [],
+      },
+    });
+    expect(stage(mutation, CTX)).toEqual(mutation);
+  });
+
+  it("uses a stable resource URL across duplicate nodes and resnapshots", () => {
+    const stage = createRewriteStage(KEY);
+    const source = fullSnapshot({
+      type: 2,
+      tagName: "img",
+      attributes: { src: "https://cdn.example/page.png" },
+    });
+    expect(stage(source, CTX)).toEqual(stage(source, CTX));
+    expect(stage(source, { ...CTX, tabId: "other" })).not.toEqual(stage(source, CTX));
+  });
+
+  it("proxies object URLs but leaves non-fetchable schemes alone", () => {
+    const stage = createRewriteStage(KEY);
+    const source = fullSnapshot({
+      type: 2,
+      tagName: "img",
+      attributes: { src: "blob:https://reader.example/id" },
+    });
+    expect(JSON.stringify(stage(source, CTX))).toContain("/s/");
+    expect(rewriteCssText("a{background:url(about:blank)}", () => "wrong")).toBe(
+      "a{background:url(about:blank)}",
+    );
+  });
+
   it("rewrites an @font-face woff2 URL to a sealed session asset route", () => {
     const stage = createRewriteStage(KEY);
     stage(

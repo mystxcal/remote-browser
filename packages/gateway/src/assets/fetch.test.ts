@@ -12,6 +12,53 @@ const ref: AssetRef = {
 };
 
 describe("asset fetch lanes", () => {
+  it("reads object URLs in bounded slices and releases the browser handle", async () => {
+    const payload = Buffer.alloc(140000, 42);
+    const send = vi.fn<CdpSend>(async (_session, method, params) => {
+      if (method === "Page.createIsolatedWorld") return { executionContextId: 7 };
+      if (method === "Runtime.evaluate") return { result: { objectId: "blob" } };
+      if (method === "Runtime.releaseObject") return {};
+      if (method === "Runtime.callFunctionOn") {
+        if (!params?.arguments)
+          return { result: { value: { size: payload.length, type: "image/png" } } };
+        const args = params.arguments as { value: number }[];
+        expect(args[1]!.value).toBe(65536);
+        return {
+          result: {
+            value: payload
+              .subarray(args[0]!.value, args[0]!.value + args[1]!.value)
+              .toString("base64"),
+          },
+        };
+      }
+      throw new Error(method);
+    });
+    const fetcher = createAssetFetcher({ send, sessionFor: () => "cdp", frameFor: () => "frame" });
+    const response = await fetcher.fetch({
+      ref: { ...ref, url: "blob:https://reader.example/id" },
+    });
+    const chunks: Buffer[] = [];
+    for await (const bytes of response.body) chunks.push(bytes);
+    expect(Buffer.concat(chunks)).toEqual(payload);
+    expect(send.mock.calls.at(-1)?.[1]).toBe("Runtime.releaseObject");
+  });
+
+  it("never sends browser-owned object URLs to the direct HTTP fallback", async () => {
+    const directRequest = vi.fn<DirectRequest>();
+    const fetcher = createAssetFetcher({
+      sessionFor: () => "cdp",
+      frameFor: () => "frame",
+      send: async () => {
+        throw new Error("object was revoked");
+      },
+      directRequest,
+    });
+    await expect(
+      fetcher.fetch({ ref: { ...ref, url: "blob:https://reader.example/id" } }),
+    ).rejects.toThrow("revoked");
+    expect(directRequest).not.toHaveBeenCalled();
+  });
+
   it("falls back from any Lane-A setup error to Lane B with browser cookies and UA", async () => {
     const methods: string[] = [];
     const send: CdpSend = async (_sessionId, method) => {

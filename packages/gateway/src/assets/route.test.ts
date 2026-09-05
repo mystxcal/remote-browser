@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createAssetCache } from "./cache";
 import type { AssetFetcher } from "./fetch";
-import { registerAssetRoutes } from "./route";
+import { registerAssetRoutes, rejectPrivateAssetTarget } from "./route";
 import { sealAssetToken } from "./token";
 
 const dirs: string[] = [];
@@ -18,6 +18,12 @@ afterEach(async () => {
 });
 
 describe("asset route policy boundary", () => {
+  it("routes browser objects without DNS and rejects unsupported schemes", async () => {
+    const lookup = vi.fn(async () => []);
+    await rejectPrivateAssetTarget("blob:https://reader.example/object", lookup);
+    expect(lookup).not.toHaveBeenCalled();
+    await expect(rejectPrivateAssetTarget("file:///etc/passwd", lookup)).rejects.toThrow();
+  });
   it("decrypts the token and rejects private/cloud-metadata targets before fetching", async () => {
     const app = Fastify();
     const serverKey = randomBytes(32);
@@ -149,9 +155,9 @@ describe("asset route policy boundary", () => {
 
       expect(first.statusCode).toBe(200);
       expect(first.headers["content-type"]).toBe(contentType);
-      expect(first.headers["cache-control"]).toBe("public, max-age=31536000, immutable");
+      expect(first.headers["cache-control"]).toBe("private, max-age=31536000, immutable");
       expect(cached.headers["content-type"]).toBe(contentType);
-      expect(cached.headers["cache-control"]).toBe("public, max-age=31536000, immutable");
+      expect(cached.headers["cache-control"]).toBe("private, max-age=31536000, immutable");
       expect(fetch).toHaveBeenCalledOnce();
       await app.close();
     },

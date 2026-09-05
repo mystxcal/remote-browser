@@ -49,6 +49,8 @@ export function attachChangeCapture(options: ChangeCaptureOptions): {
   const schedule = options.setTimer ?? setTimeout;
   const cancel = options.clearTimer ?? clearTimeout;
   const forwardedClock = options.forwardedClock ?? createForwardedInputClock();
+  const valueClock = createForwardedInputClock();
+  const lastValues = new WeakMap<ValueControl, string>();
   const composingNodes = new Set<number>();
   const composeFlushTimers = new Map<number, ReturnType<typeof setTimeout>>();
 
@@ -79,7 +81,11 @@ export function attachChangeCapture(options: ChangeCaptureOptions): {
         .map((option) => option.value);
     }
     options.send(message);
-    forwardedClock.mark(nodeId, now());
+    valueClock.mark(nodeId, now());
+    lastValues.set(control, control.value);
+    // Only raw key/text forwarding may suppress its matching native input event.
+    // A value update has no future native input to consume: marking this clock
+    // would drop the next soft-keyboard edits in a fast typing burst.
   };
 
   const cancelComposeFlush = (nodeId: number) => {
@@ -129,6 +135,9 @@ export function attachChangeCapture(options: ChangeCaptureOptions): {
     }
     const lastForwardedAt = forwardedClock.get(resolved.nodeId);
     if (lastForwardedAt !== undefined && now() - lastForwardedAt < orphanWindowMs) return;
+    const lastValueAt = valueClock.get(resolved.nodeId);
+    if (lastValueAt !== undefined && now() - lastValueAt < orphanWindowMs &&
+        lastValues.get(resolved.control) === resolved.control.value) return;
     sendValue(resolved.control, resolved.nodeId);
   };
 
@@ -137,10 +146,11 @@ export function attachChangeCapture(options: ChangeCaptureOptions): {
     const resolved = resolveControl(event.target);
     if (resolved === null) return;
     const lastForwardedAt = forwardedClock.get(resolved.nodeId);
+    const lastValueAt = valueClock.get(resolved.nodeId);
     if (
       isEchoField(resolved.control) &&
-      lastForwardedAt !== undefined &&
-      now() - lastForwardedAt < typingWindowMs
+      ((lastForwardedAt !== undefined && now() - lastForwardedAt < typingWindowMs) ||
+        (lastValueAt !== undefined && now() - lastValueAt < typingWindowMs))
     ) {
       return;
     }
@@ -161,7 +171,6 @@ export function attachChangeCapture(options: ChangeCaptureOptions): {
     if (resolved === null || !isEchoField(resolved.control)) return;
     composingNodes.delete(resolved.nodeId);
     cancelComposeFlush(resolved.nodeId);
-    forwardedClock.mark(resolved.nodeId, now());
     sendValue(resolved.control, resolved.nodeId);
   };
 

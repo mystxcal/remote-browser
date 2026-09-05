@@ -20,6 +20,7 @@ import { isIP } from "node:net";
 import type { AssetCache, CachedAsset } from "./cache";
 import type { AssetFetcher, AssetFetchResponse } from "./fetch";
 import { openAssetToken, type AssetRef } from "./token";
+import { rewriteFetchedStylesheet } from "./stylesheet";
 
 interface AssetRouteParams {
   sid: string;
@@ -82,6 +83,8 @@ export function registerAssetRoutes(app: FastifyInstance, deps: AssetRouteDeps):
       let response: AssetFetchResponse;
       try {
         response = await deps.fetcher.fetch({ ref, ...(range === undefined ? {} : { range }) });
+        if (range === undefined)
+          response = await rewriteFetchedStylesheet(response, ref, deps.serverKey);
       } catch {
         return reply.code(502).send({ error: "Asset fetch failed" });
       }
@@ -109,7 +112,13 @@ export async function rejectPrivateAssetTarget(
   target: string,
   lookup: AssetTargetLookup = defaultLookup,
 ): Promise<void> {
-  const hostname = unbracket(new URL(target).hostname);
+  const parsed = new URL(target);
+  // Object URLs belong to this browser, not DNS or a direct HTTP fallback.
+  if (parsed.protocol === "blob:") return;
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new PrivateAssetTargetError();
+  }
+  const hostname = unbracket(parsed.hostname);
   const literalFamily = isIP(hostname);
   const addresses =
     literalFamily === 0 ? await lookup(hostname) : [{ address: hostname, family: literalFamily }];
@@ -210,7 +219,7 @@ function applyResponse(
   }
 }
 
-const IMMUTABLE_FONT_CACHE_CONTROL = "public, max-age=31536000, immutable";
+const IMMUTABLE_FONT_CACHE_CONTROL = "private, max-age=31536000, immutable";
 const FONT_CONTENT_TYPES = new Set(["font/woff2", "font/woff", "font/ttf", "font/otf"]);
 
 function headerValue(
@@ -231,6 +240,10 @@ function isFontContentType(value: string | undefined): boolean {
 }
 
 const HOP_BY_HOP_HEADERS = new Set([
+  // Upstream origin controls must not control the gateway origin.
+  "set-cookie",
+  "clear-site-data",
+  "alt-svc",
   "connection",
   "keep-alive",
   "proxy-authenticate",

@@ -10,6 +10,7 @@ import type { AgentLink } from "../types";
 import type { Down, Up } from "@mirror/protocol";
 
 import { sealAssetToken } from "../assets/token";
+import { createRewriteStage } from "../assets/rewrite";
 import { TabHub, type RewriteStage } from "../hub/tabhub";
 import type { TargetRef } from "../types";
 import type { BrowserHandle, BrowserTargetInfo } from "../browser/launch";
@@ -234,7 +235,9 @@ export function createTabLifecycle(opts: TabLifecycleOpts): TabLifecycle {
       new TabHub({
         sessionId: opts.sessionId,
         tabId: target.targetId,
-        ...(opts.rewrite === undefined ? {} : { rewrite: opts.rewrite }),
+        // Asset isolation is part of constructing a browser tab, not optional wiring in
+        // an entrypoint. Each tab also owns its rewriter's document URL lifetime.
+        rewrite: opts.rewrite ?? createRewriteStage(assetTokenKey),
       });
     const state = { target, hub };
     tabs.set(target.targetId, state);
