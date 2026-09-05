@@ -2,6 +2,7 @@
 export interface ForwardedInputClock {
   mark(nodeId: number, timestamp: number): void;
   get(nodeId: number): number | undefined;
+  forget(nodeId: number): void;
   clear(): void;
 }
 
@@ -13,6 +14,9 @@ export function createForwardedInputClock(): ForwardedInputClock {
     },
     get(nodeId) {
       return timestamps.get(nodeId);
+    },
+    forget(nodeId) {
+      timestamps.delete(nodeId);
     },
     clear() {
       timestamps.clear();

@@ -420,7 +420,7 @@ describe("P1 input capture", () => {
     expect(browserShortcut.preventDefault).toHaveBeenCalledOnce();
   });
 
-  it("allows native paste in an input, forwards text, and avoids an orphan value duplicate", () => {
+  it("sends the complete native paste value without replaying the remote clipboard", () => {
     const doc = new FakeDocument();
     const input = new FakeElement(40);
     input.tagName = "INPUT";
@@ -450,13 +450,16 @@ describe("P1 input capture", () => {
       clipboardData: { getData: () => "paste" },
       preventDefault: vi.fn(),
     };
+    clock.mark(40, now);
+    doc.fire("keydown", keyboard(input, "v", { ctrlKey: true }));
+    expect(sent).toEqual([]);
     doc.fire("paste", paste);
-    input.value = "paste";
+    input.value = "prefix paste suffix";
     now = 101;
     doc.fire("input", { target: input, isTrusted: true });
 
     expect(paste.preventDefault).not.toHaveBeenCalled();
-    expect(sent).toEqual([{ t: "text", tab: "T1", insert: "paste" }]);
+    expect(sent).toEqual([{ t: "value", tab: "T1", nodeId: 40, value: "prefix paste suffix" }]);
   });
 
   it("forwards an orphan native input through the existing value message once", () => {

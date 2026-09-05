@@ -2,9 +2,9 @@
  * Keyboard capture and forwarding.
  *
  * keydown/keyup -> `key` msgs with CDP mods encoding (protocol Mod). Native text controls keep
- * editing and caret defaults; browser/page shortcuts that escape the field are contained. Paste
- * and contenteditable composition commits are forwarded separately as `text` while editing the
- * real control.
+ * editing and caret defaults; browser/page shortcuts that escape the field are contained.
+ * Value-control paste is synchronized by change capture. Contenteditable paste and
+ * composition commits are forwarded as text.
  */
 import type { TabId } from "@mirror/protocol";
 import type { ForwardedInputClock } from "./forwarded";
@@ -143,6 +143,10 @@ export function attachKeyCapture(options: KeyCaptureOptions): () => void {
   };
   const onKey = (event: KeyboardEvent, kind: "down" | "up") => {
     if (!event.isTrusted || event.isComposing || isLocalShortcut(event)) return;
+    // A value control pastes locally and sends its resulting value. Forwarding
+    // Ctrl/Cmd-V as well can paste the remote browser's unrelated clipboard.
+    if (isElement(event.target) && isValueEchoField(event.target) &&
+        !event.altKey && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v") return;
     if (kind === "down") options.onKeyDown?.(event, focused);
     const target = isElement(event.target) ? event.target : focused?.element;
     if (kind === "down" && event.key === "Enter" && target !== undefined && isEchoField(target)) {
@@ -161,12 +165,7 @@ export function attachKeyCapture(options: KeyCaptureOptions): () => void {
     // otherwise it suppresses change.ts's value-sync — the ONLY lane that carries mobile text to
     // the remote — for every keystroke, so nothing ever reaches the field. Real character keys
     // (event.key.length === 1) and true-IME keys (isComposing, bailed above) are unaffected.
-    if (
-      kind === "down" &&
-      target !== undefined &&
-      isEchoField(target) &&
-      event.key !== "Unidentified"
-    ) {
+    if (kind === "down" && target !== undefined && isEchoField(target) && event.key !== "Unidentified") {
       options.forwardedClock?.mark(nearestNodeId(target, options.getNodeId), now());
     }
     if (target === undefined || !isEchoField(target) || shouldPreventEchoFieldDefault(event)) {
@@ -221,10 +220,16 @@ export function attachKeyCapture(options: KeyCaptureOptions): () => void {
   };
   const onPaste = (event: ClipboardEvent) => {
     if (!event.isTrusted) return;
+    const target = isElement(event.target) ? event.target : focused?.element;
+    if (target !== undefined && isValueEchoField(target)) {
+      // The native input event carries the complete post-paste value, including
+      // local selection replacement. It must not be suppressed by an earlier key.
+      options.forwardedClock?.forget(nearestNodeId(target, options.getNodeId));
+      return;
+    }
     const insert = event.clipboardData?.getData("text/plain");
     if (insert === undefined) return;
     options.send({ t: "text", tab: options.tab, insert });
-    const target = isElement(event.target) ? event.target : focused?.element;
     if (target !== undefined && isEchoField(target)) {
       options.forwardedClock?.mark(nearestNodeId(target, options.getNodeId), now());
     } else {
