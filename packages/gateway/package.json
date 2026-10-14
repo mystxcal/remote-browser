@@ -26,11 +26,11 @@
   "devDependencies": {
     "@mirror/agent": "workspace:*",
     "@mirror/protocol": "workspace:*",
-    "@types/dockerode": "^4.0.1",
-    "@types/node": "^22.0.0",
+    "@types/dockerode": "^4.0.2",
+    "@types/node": "^26.6.5",
     "@types/ws": "^8.5.0",
     "dockerode": "^5.0.1",
-    "esbuild": "^0.28.1",
-    "tsx": "^4.19.0"
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15"
   }
 }
