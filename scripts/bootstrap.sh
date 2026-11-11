@@ -42,9 +42,21 @@ docker compose up --detach --build
 
 published=$(docker compose port gateway 3000 | tail -n 1)
 published_port=${published##*:}
-local_origin="http://127.0.0.1:${published_port}"
+published_host=${published%:*}
+published_host=${published_host#\[}
+published_host=${published_host%\]}
+
+# Wildcard bind addresses are not connectable destinations. Explicit interface
+# binds must be probed through that interface rather than through loopback.
+case "$published_host" in
+  0.0.0.0) health_host=127.0.0.1 ;;
+  ::) health_host='[::1]' ;;
+  *:*) health_host="[${published_host}]" ;;
+  *) health_host="$published_host" ;;
+esac
+local_origin="http://${health_host}:${published_port}"
 deadline=$((SECONDS + 180))
-until health=$(curl --fail --silent "${local_origin}/healthz" 2>/dev/null) &&
+until health=$(curl --noproxy "*" --max-time 5 --fail --silent "${local_origin}/healthz" 2>/dev/null) &&
   [[ $health == *'"ok":true'* && $health == *'"browser":true'* ]]; do
   if ((SECONDS >= deadline)); then
     printf 'Remote Browser did not become healthy in time.\n' >&2

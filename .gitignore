@@ -1,13 +1,52 @@
+# Dependencites
 node_modules/
+.pnpm-store/
+
+# Build
 dist/
-coverage/
-*.log
-.DS_Store
+*.tsbuildinfo
 .vite/
+
+# Test
+coverage/
+playwright-report/
+test-results/
+blob-report/
+scripts/out/
+
+# Logs
+*.log
+*.log.*
+
+# Temporary
 .cache/
 /tmp/
+
+# Env
 .env
 .env.*
 !.env.example
-scripts/out/
-remote-browser-oss-agent-final.md
+
+# OS
+.DS_Store
+._*
+.AppleDouble
+.LSOverride
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+*.stackdump
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Temporary
+*.swp
+*.swo
+*~

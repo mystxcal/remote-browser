@@ -17,12 +17,6 @@
     "node": ">=22.23.1 <23",
     "pnpm": "9.15.9"
   },
-  "pnpm": {
-    "overrides": {
-      "brace-expansion": "5.0.8",
-      "find-my-way": "9.7.0"
-    }
-  },
   "scripts": {
     "build": "pnpm -r --if-present run build",
     "typecheck": "pnpm -r --if-present run typecheck",
@@ -57,5 +51,19 @@
     "tsx": "^4.19.0",
     "typescript": "^5.5.4",
     "vitest": "^3.0.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "vitest@>=2.1.0 <4.1.11": ">=4.1.11",
+      "@vitest/mocker@>=2.1.0 <4.1.11": ">=4.1.11",
+      "brace-expansion@>=4.0.0 <5.0.12": ">=5.0.12",
+      "brace-expansion@>=4.0.0 <5.0.11": ">=5.0.11",
+      "tinypool@<=2.1.0": ">=2.1.1",
+      "tinypool@<2.1.2": ">=2.1.2",
+      "@vitest/mocker@>=2.1.0-beta.7 <4.1.12": ">=4.1.12",
+      "zod@<4.6.6": ">=4.6.6",
+      "glob@>=9.0.0 <=14.0.1": ">=14.0.2",
+      "minimatch@>=7.0.0 <11.0.1": ">=11.0.1"
+    }
   }
 }

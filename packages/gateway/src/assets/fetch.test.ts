@@ -12,6 +12,19 @@ const ref: AssetRef = {
 };
 
 describe("asset fetch lanes", () => {
+  it("uses the validated addresses instead of Chromium network loading", async () => {
+    const send = vi.fn<CdpSend>(async (_session, method) => {
+      if (method === "Network.getCookies") return { cookies: [] };
+      if (method === "Browser.getVersion") return { userAgent: "Browser UA" };
+      throw new Error(`Unexpected CDP method ${method}`);
+    });
+    const directRequest = vi.fn<DirectRequest>(async () => directResponse("ok", {}));
+    const fetcher = createAssetFetcher({ send, sessionFor: () => "cdp", directRequest });
+    const addresses = [{ address: "203.0.113.8", family: 4 }];
+    await fetcher.fetch({ ref, addresses });
+    expect(directRequest).toHaveBeenCalledWith(ref.url, expect.objectContaining({ addresses }));
+    expect(send.mock.calls.map((call) => call[1])).not.toContain("Network.loadNetworkResource");
+  });
   it("reads object URLs in bounded slices and releases the browser handle", async () => {
     const payload = Buffer.alloc(140000, 42);
     const send = vi.fn<CdpSend>(async (_session, method, params) => {

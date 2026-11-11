@@ -154,7 +154,6 @@ export function createResyncController(options: ResyncControllerOptions): Resync
       if (delayMs === 0) dispatch(tab, state);
       else {
         state.timer = schedule(() => dispatch(tab, state), delayMs);
-        state.timer.unref?.();
       }
       return true;
     },

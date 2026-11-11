@@ -64,8 +64,9 @@ export function registerAssetRoutes(app: FastifyInstance, deps: AssetRouteDeps):
         return reply.code(404).send({ error: "Asset session not found" });
       }
 
+      let addresses: readonly ResolvedAddress[];
       try {
-        await rejectPrivateAssetTarget(ref.url, lookup);
+        addresses = await rejectPrivateAssetTarget(ref.url, lookup);
       } catch (error) {
         if (error instanceof PrivateAssetTargetError) {
           return reply.code(403).send({ error: "Private asset target rejected" });
@@ -82,7 +83,7 @@ export function registerAssetRoutes(app: FastifyInstance, deps: AssetRouteDeps):
 
       let response: AssetFetchResponse;
       try {
-        response = await deps.fetcher.fetch({ ref, ...(range === undefined ? {} : { range }) });
+        response = await deps.fetcher.fetch({ ref, addresses, ...(range === undefined ? {} : { range }) });
         if (range === undefined)
           response = await rewriteFetchedStylesheet(response, ref, deps.serverKey);
       } catch {
@@ -111,10 +112,10 @@ export function registerAssetRoutes(app: FastifyInstance, deps: AssetRouteDeps):
 export async function rejectPrivateAssetTarget(
   target: string,
   lookup: AssetTargetLookup = defaultLookup,
-): Promise<void> {
+): Promise<readonly ResolvedAddress[]> {
   const parsed = new URL(target);
   // Object URLs belong to this browser, not DNS or a direct HTTP fallback.
-  if (parsed.protocol === "blob:") return;
+  if (parsed.protocol === "blob:") return [];
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new PrivateAssetTargetError();
   }
@@ -123,9 +124,10 @@ export async function rejectPrivateAssetTarget(
   const addresses =
     literalFamily === 0 ? await lookup(hostname) : [{ address: hostname, family: literalFamily }];
   if (addresses.length === 0) throw new Error("Asset target resolved to no addresses");
-  if (addresses.some(({ address }) => isPrivateAddress(address))) {
+  if (addresses.some(({ address, family }) => isIP(address) !== family || isPrivateAddress(address))) {
     throw new PrivateAssetTargetError();
   }
+  return addresses;
 }
 
 class PrivateAssetTargetError extends Error {
@@ -165,6 +167,7 @@ function isPrivateIpv4(address: string): boolean {
   const second = parts[1];
   if (first === undefined || second === undefined) return false;
   return (
+    first === 0 ||
     first === 10 ||
     first === 127 ||
     (first === 172 && second >= 16 && second <= 31) ||

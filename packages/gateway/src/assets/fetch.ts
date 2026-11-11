@@ -7,8 +7,9 @@
  *
  * Content-Type is copied only from response headers. No URL-based inference happens here.
  */
+import type { LookupFunction } from "node:net";
 import { Readable } from "node:stream";
-import { request as undiciRequest } from "undici";
+import { Agent, request as undiciRequest } from "undici";
 
 import type { CdpSend } from "../types";
 import type { AssetRef } from "./token";
@@ -19,6 +20,8 @@ type HeaderValue = string | readonly string[] | undefined;
 
 export interface AssetFetchRequest {
   ref: AssetRef;
+  /** Addresses validated by the route, pinned to the actual HTTP connection. */
+  addresses?: readonly { address: string; family: number }[];
   /** Forwarded byte-for-byte to Lane B. Its presence selects Lane B immediately. */
   range?: string;
 }
@@ -38,7 +41,10 @@ export interface DirectResponse {
 
 export type DirectRequest = (
   url: string,
-  options: { headers: Record<string, string> },
+  options: {
+    headers: Record<string, string>;
+    addresses?: readonly { address: string; family: number }[];
+  },
 ) => Promise<DirectResponse>;
 
 export interface AssetFetcherDeps {
@@ -85,6 +91,11 @@ export function createAssetFetcher(deps: AssetFetcherDeps): AssetFetcher {
 
       if (new URL(request.ref.url).protocol === "blob:") {
         return fetchBrowserObject(deps, request.ref, cdpSessionId);
+      }
+
+      // Chromium resolves names independently, so it cannot use the route's checked addresses.
+      if (request.addresses !== undefined) {
+        return fetchDirect(deps, directRequest, request, cdpSessionId);
       }
 
       if (request.range !== undefined) {
@@ -256,7 +267,10 @@ async function fetchDirect(
   if (cookie !== "") headers.cookie = cookie;
   if (request.range !== undefined) headers.range = request.range;
 
-  const response = await directRequest(request.ref.url, { headers });
+  const response = await directRequest(request.ref.url, {
+    headers,
+    ...(request.addresses === undefined ? {} : { addresses: request.addresses }),
+  });
   return {
     statusCode: positiveStatus(response.statusCode, 502),
     headers: normalizeHeaders(response.headers),
@@ -267,12 +281,24 @@ async function fetchDirect(
 
 async function defaultDirectRequest(
   url: string,
-  options: { headers: Record<string, string> },
+  options: {
+    headers: Record<string, string>;
+    addresses?: readonly { address: string; family: number }[];
+  },
 ): Promise<DirectResponse> {
-  const response = await undiciRequest(url, {
-    method: "GET",
-    headers: options.headers,
+  const addresses = options.addresses;
+  if (addresses !== undefined && addresses.length === 0) throw new Error("No validated address");
+  const lookup: LookupFunction = (_hostname, _lookupOptions, callback) => {
+    const address = addresses?.[0];
+    if (address === undefined) return callback(new Error("No validated address"), "", 0);
+    callback(null, address.address, address.family);
+  };
+  const dispatcher = addresses === undefined ? undefined : new Agent({ connect: { lookup, autoSelectFamily: false } });
+  const response = await undiciRequest(url, { method: "GET", headers: options.headers, dispatcher }).catch(async (error: unknown) => {
+    await dispatcher?.close();
+    throw error;
   });
+  response.body.once("close", () => void dispatcher?.close());
   return {
     statusCode: response.statusCode,
     headers: response.headers,
